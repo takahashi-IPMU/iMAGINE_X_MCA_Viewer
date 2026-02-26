@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Amptek MCA Spectrum Viewer</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Hammer.js and Chartjs-Plugin-Zoom for interactive zooming -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        .drag-over { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+        /* スクロールバーのカスタマイズ */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 h-screen overflow-hidden flex flex-col">
+    
+    <!-- Toast Container -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <header class="bg-white shadow-sm px-6 py-4 flex justify-between items-center border-b border-gray-200 shrink-0">
+        <h1 class="text-xl font-bold text-gray-900 flex items-center">
+            <svg class="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path></svg>
+            MCA Spectrum Viewer
+        </h1>
+    </header>
+
+    <main class="flex-grow p-4 md:p-6 flex flex-col md:flex-row gap-4 max-w-[1600px] mx-auto w-full min-h-0 overflow-hidden">
+        <!-- Sidebar -->
+        <aside class="w-full md:w-[300px] flex flex-col gap-2 h-full overflow-y-auto pr-2 pb-2 shrink-0">
+            <div id="dropZone" class="bg-white p-3 rounded-lg shadow-sm border-2 border-dashed border-gray-300 text-center transition-colors cursor-pointer hover:bg-gray-50 shrink-0">
+                <!-- .txt 形式も受け入れるように accept 属性を拡張 -->
+                <input type="file" id="fileInput" accept=".mca,.txt,.csv" class="hidden">
+                <svg class="mx-auto h-6 w-6 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <div class="mt-1 text-[11px] text-gray-600">
+                    <span class="font-medium text-blue-600">ファイルを選択</span> またはドロップ
+                </div>
+            </div>
+
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h2 class="text-[11px] font-bold text-gray-700 uppercase tracking-wider mb-1 border-b pb-1">Measurement Data</h2>
+                <div id="metadataContainer" class="text-xs text-gray-600">
+                    <p class="text-gray-400 italic text-xs">No data loaded.</p>
+                </div>
+            </div>
+
+            <!-- Binning (Rebin) Panel -->
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h3 class="text-[11px] font-semibold text-gray-800 mb-1 border-b pb-1">Rebinning (Channel Bin)</h3>
+                <div class="flex items-center gap-2 mb-1.5">
+                    <label class="text-[10px] text-gray-500 w-12">Bin Size:</label>
+                    <input type="number" id="binSizeInput" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="1" value="1" min="1" step="1">
+                </div>
+                <div class="flex gap-2">
+                    <button id="applyBinBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors">Apply</button>
+                    <button id="resetBinBtn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-medium py-1 px-2 rounded w-full transition-colors border border-gray-300">Reset</button>
+                </div>
+            </div>
+
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h3 class="text-[11px] font-semibold text-gray-800 mb-1 border-b pb-1">X-Axis Range</h3>
+                <div class="flex gap-2">
+                    <div class="flex items-center gap-1 flex-1">
+                        <label class="text-[10px] text-gray-500">Min:</label>
+                        <input type="number" id="xAxisMin" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                    </div>
+                    <div class="flex items-center gap-1 flex-1">
+                        <label class="text-[10px] text-gray-500">Max:</label>
+                        <input type="number" id="xAxisMax" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-1.5">
+                    <button id="applyXAxisBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors">Apply</button>
+                    <button id="resetXAxisBtn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-medium py-1 px-2 rounded w-full transition-colors border border-gray-300">Reset</button>
+                </div>
+            </div>
+
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h3 class="text-[11px] font-semibold text-gray-800 mb-1 border-b pb-1">Y-Axis Range</h3>
+                <div class="mb-1.5">
+                    <span class="text-[9px] font-bold text-gray-700 block mb-0.5">Linear</span>
+                    <div class="flex gap-2">
+                        <div class="flex items-center gap-1 flex-1">
+                            <label class="text-[10px] text-gray-500">Min:</label>
+                            <input type="number" id="yAxisMinLin" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                        </div>
+                        <div class="flex items-center gap-1 flex-1">
+                            <label class="text-[10px] text-gray-500">Max:</label>
+                            <input type="number" id="yAxisMaxLin" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                        </div>
+                    </div>
+                </div>
+                <div class="mb-1.5">
+                    <span class="text-[9px] font-bold text-gray-700 block mb-0.5">Log</span>
+                    <div class="flex gap-2">
+                        <div class="flex items-center gap-1 flex-1">
+                            <label class="text-[10px] text-gray-500">Min:</label>
+                            <input type="number" id="yAxisMinLog" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                        </div>
+                        <div class="flex items-center gap-1 flex-1">
+                            <label class="text-[10px] text-gray-500">Max:</label>
+                            <input type="number" id="yAxisMaxLog" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="Auto">
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-1.5">
+                    <button id="applyYAxisBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors">Apply</button>
+                    <button id="resetYAxisBtn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-medium py-1 px-2 rounded w-full transition-colors border border-gray-300">Reset</button>
+                </div>
+            </div>
+            
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h3 class="text-[11px] font-semibold text-gray-800 mb-1 border-b pb-1">Energy Calibration</h3>
+                <p class="text-[10px] text-gray-500 mb-1.5 font-mono text-center">Energy = a &times; channel + b</p>
+                <div class="flex gap-2">
+                    <div class="flex items-center gap-1 flex-1">
+                        <label class="text-[10px] text-gray-600 font-mono font-bold">a:</label>
+                        <input type="number" id="calibA" step="any" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="1.0">
+                    </div>
+                    <div class="flex items-center gap-1 flex-1">
+                        <label class="text-[10px] text-gray-600 font-mono font-bold">b:</label>
+                        <input type="number" id="calibB" step="any" class="border border-gray-300 rounded px-1.5 py-0.5 text-[11px] w-full focus:outline-none focus:border-blue-500" placeholder="0.0">
+                    </div>
+                </div>
+                <div class="flex gap-2 mt-1.5">
+                    <button id="applyCalibBtn" class="bg-green-600 hover:bg-green-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors">Calibrate</button>
+                    <button id="resetCalibBtn" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[10px] font-medium py-1 px-2 rounded w-full transition-colors border border-gray-300">Reset</button>
+                </div>
+            </div>
+
+            <div class="bg-white p-2 rounded-lg shadow-sm border border-gray-200 shrink-0">
+                <h3 class="text-[11px] font-semibold text-gray-800 mb-1 border-b pb-1">Export Data</h3>
+                <div class="flex flex-col gap-1.5">
+                    <button id="exportCsvBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors flex justify-center items-center">
+                        <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        CSV
+                    </button>
+                    <div class="flex gap-2">
+                        <button id="exportPngLinBtn" class="bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors flex justify-center items-center" title="Linearグラフを画像として保存">
+                            PNG(Lin)
+                        </button>
+                        <button id="exportPngLogBtn" class="bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-medium py-1 px-2 rounded w-full transition-colors flex justify-center items-center" title="Logグラフを画像として保存">
+                            PNG(Log)
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 p-2 rounded-lg shadow-sm border border-blue-100 shrink-0">
+                <h3 class="text-[10px] font-semibold text-blue-800 mb-0.5">操作ヒント</h3>
+                <ul class="text-[9px] text-blue-700 list-disc list-inside space-y-0">
+                    <li>ホイール: X軸ズーム</li>
+                    <li>ドラッグ: グラフパン</li>
+                </ul>
+            </div>
+        </aside>
+
+        <section class="flex-1 flex flex-col gap-4 h-full min-h-0">
+            <!-- Linear Chart -->
+            <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col flex-1 min-h-0">
+                <div class="flex justify-between items-center mb-2 shrink-0">
+                    <h2 class="text-lg font-semibold text-gray-800"><span id="chartTitleLin">Waiting for data...</span> (Linear)</h2>
+                    <button id="resetZoomBtnLin" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 py-1 px-3 rounded transition-colors hidden">
+                        Reset Zoom
+                    </button>
+                </div>
+                <div class="relative w-full flex-1 min-h-0">
+                    <canvas id="spectrumChartLin"></canvas>
+                </div>
+            </div>
+
+            <!-- Log Chart -->
+            <div class="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col flex-1 min-h-0">
+                <div class="flex justify-between items-center mb-2 shrink-0">
+                    <h2 class="text-lg font-semibold text-gray-800"><span id="chartTitleLog">Waiting for data...</span> (Log)</h2>
+                    <button id="resetZoomBtnLog" class="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 py-1 px-3 rounded transition-colors hidden">
+                        Reset Zoom
+                    </button>
+                </div>
+                <div class="relative w-full flex-1 min-h-0">
+                    <canvas id="spectrumChartLog"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // --- トースト通知機能 ---
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            let bgColor = 'bg-blue-600';
+            if (type === 'error') bgColor = 'bg-red-600';
+            if (type === 'success') bgColor = 'bg-green-600';
+            if (type === 'warning') bgColor = 'bg-yellow-600';
+
+            toast.className = `${bgColor} text-white px-4 py-3 rounded shadow-lg text-sm font-medium transition-all duration-300 opacity-0 transform translate-y-[-10px]`;
+            toast.textContent = message;
+            
+            document.getElementById('toastContainer').appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('opacity-0', 'translate-y-[-10px]');
+            }, 10);
+            
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-[-10px]');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000); // 確認しやすいように表示時間を5秒に延長
+        }
+
+        let chartInstanceLin = null;
+        let chartInstanceLog = null;
+        
+        let currentRawData = [];
+        let currentFilename = 'Spectrum';
+
+        let calibA = 1.0;
+        let calibB = 0.0;
+        let isCalibrated = false;
+
+        // Rebinning State
+        let currentBinSize = 1;
+
+        // --- 背景を白で塗りつぶすカスタムプラグイン (PNG書き出し時に背景が透明になるのを防ぐ) ---
+        const customCanvasBackgroundColor = {
+            id: 'customCanvasBackgroundColor',
+            beforeDraw: (chart, args, options) => {
+                const {ctx} = chart;
+                ctx.save();
+                ctx.globalCompositeOperation = 'destination-over';
+                ctx.fillStyle = options.color || '#ffffff';
+                ctx.fillRect(0, 0, chart.width, chart.height);
+                ctx.restore();
+            }
+        };
+
+        // --- MCA/TXTファイルのパース関数 ---
+        function parseMCA(text) {
+            const lines = text.split(/\r?\n/);
+            const data = [];
+            const meta = {};
+            let isDataSection = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                
+                // 大文字小文字の揺らぎにも対応
+                if (line.toUpperCase() === '<<DATA>>') {
+                    isDataSection = true;
+                    continue;
+                }
+                if (line.toUpperCase() === '<<END>>' || line.toUpperCase() === '<<DP5 CONFIGURATION>>') {
+                    isDataSection = false;
+                    continue;
+                }
+
+                if (isDataSection) {
+                    if (line !== '') {
+                        const val = parseInt(line, 10);
+                        // 異常値（NaN）の混入を防ぐ
+                        if (!isNaN(val)) {
+                            data.push(val);
+                        }
+                    }
+                } else if (line.includes(' - ')) {
+                    const idx = line.indexOf(' - ');
+                    const key = line.substring(0, idx).trim();
+                    const val = line.substring(idx + 3).trim();
+                    meta[key] = val;
+                } else if (line.includes(': ')) {
+                    const idx = line.indexOf(': ');
+                    const key = line.substring(0, idx).trim();
+                    const val = line.substring(idx + 2).trim();
+                    meta[key] = val;
+                }
+            }
+            return { data, meta };
+        }
+
+        // --- リストモード(イベントデータ)をヒストグラムに変換するアルゴリズム ---
+        // 確信度: 高。データの最大値から適切な2のべき乗のビンサイズを自動決定します。
+        function convertListToHistogram(listData) {
+            let maxVal = 0;
+            for (let i = 0; i < listData.length; i++) {
+                if (listData[i] > maxVal) maxVal = listData[i];
+            }
+            
+            // 最大値を含む適切なチャンネル数 (1024, 2048, 4096...) を決定
+            let chSize = 512;
+            while (chSize <= maxVal) {
+                chSize *= 2;
+            }
+            // メモリ保護のため最大チャンネル数を制限
+            if (chSize > 65536) chSize = 65536;
+            
+            const histogram = new Array(chSize).fill(0);
+            for (let i = 0; i < listData.length; i++) {
+                const val = listData[i];
+                if (val >= 0 && val < chSize) {
+                    histogram[val]++;
+                }
+            }
+            return histogram;
+        }
+
+        // --- Binning (リビニング) 処理 ---
+        // 確信度: 高。元のデータを破壊せず、指定されたビンサイズでカウントを合算し、代表チャンネルをビンの中心に設定します。
+        function getBinnedData(rawData, binSize) {
+            if (binSize <= 1) return rawData.map((y, ch) => ({ ch: ch, counts: y }));
+            
+            const binned = [];
+            for (let i = 0; i < rawData.length; i += binSize) {
+                let sum = 0;
+                let count = 0;
+                // binSize 分だけカウントを足し合わせる
+                for (let j = 0; j < binSize && (i + j) < rawData.length; j++) {
+                    sum += rawData[i + j];
+                    count++;
+                }
+                // 代表となるチャンネルをビンの中心(平均)とする
+                const centerCh = i + (count - 1) / 2;
+                binned.push({ ch: centerCh, counts: sum });
+            }
+            return binned;
+        }
+
+        // --- グラフの描画関数 ---
+        function renderChart() {
+            if (currentRawData.length === 0) return;
+            const dataArray = currentRawData;
+            const filename = currentFilename;
+
+            const ctxLin = document.getElementById('spectrumChartLin').getContext('2d');
+            const ctxLog = document.getElementById('spectrumChartLog').getContext('2d');
+            
+            const xMinInput = parseFloat(document.getElementById('xAxisMin').value);
+            const xMaxInput = parseFloat(document.getElementById('xAxisMax').value);
+
+            const yMinInputLin = parseFloat(document.getElementById('yAxisMinLin').value);
+            const yMaxInputLin = parseFloat(document.getElementById('yAxisMaxLin').value);
+
+            const yMinInputLog = parseFloat(document.getElementById('yAxisMinLog').value);
+            const yMaxInputLog = parseFloat(document.getElementById('yAxisMaxLog').value);
+
+            // リビニング処理を適用（元のデータは保持したまま、一時的な描画用配列を生成）
+            const binnedData = getBinnedData(dataArray, currentBinSize);
+
+            const chartData = binnedData.map(item => {
+                let xVal = item.ch;
+                if (isCalibrated) {
+                    xVal = calibA * item.ch + calibB;
+                }
+                return { x: xVal, y: item.counts, originalChCenter: item.ch };
+            });
+            const xAxisTitle = isCalibrated ? 'Energy' : 'Channel';
+
+            if (chartInstanceLin) chartInstanceLin.destroy();
+            if (chartInstanceLog) chartInstanceLog.destroy();
+
+            document.getElementById('chartTitleLin').textContent = filename;
+            document.getElementById('chartTitleLog').textContent = filename;
+
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            title: (items) => {
+                                const item = items[0];
+                                const rawX = item.raw.x;
+                                const centerCh = item.raw.originalChCenter;
+                                
+                                // ビニング適用時は代表チャンネル（小数が含まれる場合あり）を表示
+                                let chText = currentBinSize > 1 ? `Center Ch: ${centerCh.toFixed(1)}` : `Ch: ${Math.round(centerCh)}`;
+
+                                if (isCalibrated) {
+                                    return `Energy: ${rawX.toFixed(2)} (${chText})`;
+                                }
+                                return chText;
+                            },
+                            label: (item) => `Counts: ${item.raw.y}`
+                        }
+                    }
+                }
+            };
+
+            const dataset = {
+                label: 'Counts',
+                data: chartData,
+                borderColor: 'rgba(59, 130, 246, 0.8)',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                borderWidth: 1.5,
+                pointRadius: 0,
+                pointHoverRadius: 4,
+                fill: true,
+                stepped: true
+            };
+
+            const commonScalesX = {
+                type: 'linear',
+                title: { display: true, text: xAxisTitle },
+                grid: { color: 'rgba(0,0,0,0.05)' },
+                min: !isNaN(xMinInput) ? xMinInput : undefined,
+                max: !isNaN(xMaxInput) ? xMaxInput : undefined,
+                ticks: {
+                    callback: function(value) {
+                        if (value % 1 === 0) return value;
+                        return null; 
+                    }
+                }
+            };
+
+            // Linear Chart
+            chartInstanceLin = new Chart(ctxLin, {
+                type: 'line',
+                data: { datasets: [dataset] },
+                plugins: [customCanvasBackgroundColor],
+                options: {
+                    ...commonOptions,
+                    plugins: {
+                        ...commonOptions.plugins,
+                        zoom: {
+                            pan: { enabled: true, mode: 'x', onPanComplete: () => document.getElementById('resetZoomBtnLin').classList.remove('hidden') },
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x', onZoomComplete: () => document.getElementById('resetZoomBtnLin').classList.remove('hidden') }
+                        }
+                    },
+                    scales: {
+                        x: commonScalesX,
+                        y: {
+                            type: 'linear',
+                            title: { display: true, text: 'Counts' },
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            min: !isNaN(yMinInputLin) ? Math.max(0, yMinInputLin) : 0,
+                            max: !isNaN(yMaxInputLin) ? yMaxInputLin : undefined,
+                            ticks: {
+                                callback: function(value) {
+                                    if (value % 1 === 0) return value;
+                                    return null;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            document.getElementById('resetZoomBtnLin').classList.add('hidden');
+
+            // Log Chart
+            chartInstanceLog = new Chart(ctxLog, {
+                type: 'line',
+                data: { datasets: [dataset] },
+                plugins: [customCanvasBackgroundColor],
+                options: {
+                    ...commonOptions,
+                    plugins: {
+                        ...commonOptions.plugins,
+                        zoom: {
+                            pan: { enabled: true, mode: 'x', onPanComplete: () => document.getElementById('resetZoomBtnLog').classList.remove('hidden') },
+                            zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x', onZoomComplete: () => document.getElementById('resetZoomBtnLog').classList.remove('hidden') }
+                        }
+                    },
+                    scales: {
+                        x: commonScalesX,
+                        y: {
+                            type: 'logarithmic',
+                            title: { display: true, text: 'Counts (Log)' },
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            min: !isNaN(yMinInputLog) ? (yMinInputLog <= 0 ? 0.1 : yMinInputLog) : 0.1,
+                            max: !isNaN(yMaxInputLog) ? yMaxInputLog : undefined
+                        }
+                    }
+                }
+            });
+            document.getElementById('resetZoomBtnLog').classList.add('hidden');
+        }
+
+        // --- メタデータの表示更新 ---
+        function updateMetadataUI(meta, dataArray) {
+            const container = document.getElementById('metadataContainer');
+            container.innerHTML = '';
+            
+            if (Object.keys(meta).length === 0 && (!dataArray || dataArray.length === 0)) {
+                container.innerHTML = '<p class="text-gray-400 italic text-xs">No data loaded.</p>';
+                return;
+            }
+
+            const startTime = meta['START_TIME'] || meta['Start Time'] || 'Unknown';
+            const liveTimeRaw = parseFloat(meta['LIVE_TIME'] || meta['Live Time'] || 0);
+            const realTimeRaw = parseFloat(meta['REAL_TIME'] || meta['Real Time'] || 0);
+            
+            const liveTimeStr = liveTimeRaw > 0 ? liveTimeRaw.toFixed(1) + ' s' : 'N/A';
+            const realTimeStr = realTimeRaw > 0 ? realTimeRaw.toFixed(1) + ' s' : 'N/A';
+
+            let countRateStr = 'N/A';
+            if (dataArray && dataArray.length > 0 && liveTimeRaw > 0) {
+                const totalCounts = dataArray.reduce((sum, val) => sum + val, 0);
+                const countRate = totalCounts / liveTimeRaw;
+                countRateStr = countRate.toFixed(2) + ' cps';
+            }
+
+            // Real Time を Live Time の横に薄い文字で付与
+            const items = [
+                { label: 'Start Time', value: startTime },
+                { label: 'Live Time', value: `${liveTimeStr} <span class="text-[10px] text-gray-400">(${realTimeStr})</span>` },
+                { label: 'Count Rate', value: countRateStr }
+            ];
+
+            items.forEach(item => {
+                // 行間 (py) を狭くし、コンパクト化
+                container.innerHTML += `
+                    <div class="flex justify-between items-center border-b border-gray-100 py-0.5">
+                        <span class="font-medium text-gray-700">${item.label}</span>
+                        <span class="text-gray-900 font-mono text-[11px]">${item.value}</span>
+                    </div>
+                `;
+            });
+        }
+
+        // --- ファイル読み込み処理 (自動判定ロジック含む) ---
+        function handleFile(file) {
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target.result;
+                const parsed = parseMCA(text);
+                
+                if (parsed.data.length === 0) {
+                    showToast("ファイル内に有効なデータが見つかりませんでした。", "error");
+                    return;
+                }
+
+                // ヒストグラムかリストモード（イベント毎の羅列）かをデータ長から自動判定
+                const len = parsed.data.length;
+                // 一般的なMCAのチャンネル仕様に合致するかどうか
+                const isHistogramSize = [128, 256, 512, 1024, 2048, 4096, 8192, 16384].includes(len);
+
+                if (!isHistogramSize) {
+                    // サイズが一致しない場合はリストモードデータとしてヒストグラム化処理を実行
+                    currentRawData = convertListToHistogram(parsed.data);
+                    showToast(`リストモードデータ (${len.toLocaleString()} events) として検知し、自動的にヒストグラムへ変換しました。`, "success");
+                } else {
+                    // サイズが一致する場合はそのままヒストグラムデータとして扱う
+                    currentRawData = parsed.data;
+                    showToast(`ヒストグラムデータ (${len} ch) を読み込みました。`, "success");
+                }
+
+                currentFilename = file.name;
+                renderChart();
+                // ヒストグラム化された配列を渡すことで、正確な総カウント数・レートが計算される
+                updateMetadataUI(parsed.meta, currentRawData);
+            };
+            reader.readAsText(file);
+        }
+
+        // --- 空のグラフ（初期状態）の描画 ---
+        function renderEmptyChart() {
+            const ctxLin = document.getElementById('spectrumChartLin').getContext('2d');
+            const ctxLog = document.getElementById('spectrumChartLog').getContext('2d');
+            
+            const commonOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } }
+            };
+
+            const xAxisTitle = isCalibrated ? 'Energy' : 'Channel';
+
+            if (chartInstanceLin) chartInstanceLin.destroy();
+            if (chartInstanceLog) chartInstanceLog.destroy();
+
+            chartInstanceLin = new Chart(ctxLin, {
+                type: 'line',
+                data: { datasets: [] },
+                plugins: [customCanvasBackgroundColor],
+                options: {
+                    ...commonOptions,
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: xAxisTitle }, min: 0, max: 1024, grid: { color: 'rgba(0,0,0,0.05)' } },
+                        y: { type: 'linear', title: { display: true, text: 'Counts' }, min: 0, max: 100, grid: { color: 'rgba(0,0,0,0.05)' } }
+                    }
+                }
+            });
+
+            chartInstanceLog = new Chart(ctxLog, {
+                type: 'line',
+                data: { datasets: [] },
+                plugins: [customCanvasBackgroundColor],
+                options: {
+                    ...commonOptions,
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: xAxisTitle }, min: 0, max: 1024, grid: { color: 'rgba(0,0,0,0.05)' } },
+                        y: { type: 'logarithmic', title: { display: true, text: 'Counts (Log)' }, min: 0.1, max: 100, grid: { color: 'rgba(0,0,0,0.05)' } }
+                    }
+                }
+            });
+        }
+
+        // --- イベントリスナー ---
+        document.addEventListener('DOMContentLoaded', () => {
+            renderEmptyChart();
+
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) handleFile(e.target.files[0]);
+            });
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.classList.add('drag-over');
+            });
+
+            dropZone.addEventListener('dragleave', () => {
+                dropZone.classList.remove('drag-over');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+            });
+
+            document.getElementById('resetZoomBtnLin').addEventListener('click', () => {
+                if (chartInstanceLin) {
+                    chartInstanceLin.resetZoom();
+                    document.getElementById('resetZoomBtnLin').classList.add('hidden');
+                }
+            });
+
+            document.getElementById('resetZoomBtnLog').addEventListener('click', () => {
+                if (chartInstanceLog) {
+                    chartInstanceLog.resetZoom();
+                    document.getElementById('resetZoomBtnLog').classList.add('hidden');
+                }
+            });
+
+            // Binning 適用・リセットのイベントリスナー
+            document.getElementById('applyBinBtn').addEventListener('click', () => {
+                let binVal = parseInt(document.getElementById('binSizeInput').value, 10);
+                if (isNaN(binVal) || binVal < 1) {
+                    binVal = 1;
+                    document.getElementById('binSizeInput').value = 1;
+                }
+                currentBinSize = binVal;
+                if (currentRawData.length > 0) {
+                    renderChart();
+                    showToast(`Bin Sizeを ${currentBinSize} に変更し、カウントを合算しました。`, 'success');
+                }
+            });
+
+            document.getElementById('resetBinBtn').addEventListener('click', () => {
+                document.getElementById('binSizeInput').value = 1;
+                currentBinSize = 1;
+                if (currentRawData.length > 0) {
+                    renderChart();
+                    showToast('Bin Sizeを 1 にリセットし、元のデータに戻しました。', 'info');
+                }
+            });
+
+            document.getElementById('applyXAxisBtn').addEventListener('click', () => {
+                if (currentRawData.length === 0) renderEmptyChart(); else renderChart();
+            });
+
+            document.getElementById('resetXAxisBtn').addEventListener('click', () => {
+                document.getElementById('xAxisMin').value = '';
+                document.getElementById('xAxisMax').value = '';
+                if (currentRawData.length === 0) renderEmptyChart(); else renderChart();
+            });
+
+            document.getElementById('applyYAxisBtn').addEventListener('click', () => {
+                if (currentRawData.length === 0) renderEmptyChart(); else renderChart();
+            });
+
+            document.getElementById('resetYAxisBtn').addEventListener('click', () => {
+                document.getElementById('yAxisMinLin').value = '';
+                document.getElementById('yAxisMaxLin').value = '';
+                document.getElementById('yAxisMinLog').value = '';
+                document.getElementById('yAxisMaxLog').value = '';
+                if (currentRawData.length === 0) renderEmptyChart(); else renderChart();
+            });
+
+            document.getElementById('applyCalibBtn').addEventListener('click', () => {
+                let inputA = parseFloat(document.getElementById('calibA').value);
+                let inputB = parseFloat(document.getElementById('calibB').value);
+                
+                if (isNaN(inputA) && document.getElementById('calibA').value === '') inputA = 1.0;
+                if (isNaN(inputB) && document.getElementById('calibB').value === '') inputB = 0.0;
+                
+                if (!isNaN(inputA) && !isNaN(inputB)) {
+                    calibA = inputA;
+                    calibB = inputB;
+                    isCalibrated = true;
+                    
+                    if (currentRawData.length === 0) {
+                        renderEmptyChart();
+                        showToast('設定を保存しました。データ読み込み時に適用されます。', 'info');
+                    } else {
+                        renderChart();
+                        showToast('Energyキャリブレーションを適用しました。', 'success');
+                    }
+                } else {
+                    showToast('aとbには有効な数値を入力してください。', 'error');
+                }
+            });
+
+            document.getElementById('resetCalibBtn').addEventListener('click', () => {
+                document.getElementById('calibA').value = '';
+                document.getElementById('calibB').value = '';
+                isCalibrated = false;
+                calibA = 1.0;
+                calibB = 0.0;
+                if (currentRawData.length === 0) renderEmptyChart(); else renderChart();
+                showToast('キャリブレーションをリセットしました。', 'info');
+            });
+
+            document.getElementById('exportCsvBtn').addEventListener('click', async () => {
+                if (currentRawData.length === 0) {
+                    showToast('エクスポートするデータがありません。先にファイルを読み込んでください。', 'warning');
+                    return;
+                }
+
+                // ビニング状態を反映したデータを出力
+                let csvContent = currentBinSize > 1 ? "Channel(Center),Energy,Count\n" : "Channel,Energy,Count\n";
+                const binnedData = getBinnedData(currentRawData, currentBinSize);
+                
+                for (let i = 0; i < binnedData.length; i++) {
+                    const item = binnedData[i];
+                    const channel = item.ch;
+                    const count = item.counts;
+                    const energy = isCalibrated ? (calibA * channel + calibB) : 0;
+                    csvContent += `${channel},${energy},${count}\n`;
+                }
+
+                const baseName = currentFilename !== 'Spectrum' ? currentFilename.replace(/\.[^/.]+$/, "") : 'Spectrum';
+                const defaultFilename = `${baseName}_exported.csv`;
+
+                try {
+                    if (window.showSaveFilePicker) {
+                        const opts = {
+                            suggestedName: defaultFilename,
+                            types: [{ description: 'CSV File', accept: {'text/csv': ['.csv']} }],
+                        };
+                        const handle = await window.showSaveFilePicker(opts);
+                        const writable = await handle.createWritable();
+                        await writable.write(csvContent);
+                        await writable.close();
+                        showToast('CSVファイルを指定の場所に保存しました。', 'success');
+                    } else {
+                        triggerLegacyDownload(csvContent, defaultFilename);
+                    }
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        showToast('保存がキャンセルされました。', 'info');
+                    } else {
+                        triggerLegacyDownload(csvContent, defaultFilename);
+                    }
+                }
+            });
+
+            function triggerLegacyDownload(content, filename) {
+                const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.setAttribute('href', url);
+                link.setAttribute('download', filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                showToast('ブラウザの標準設定に従い、CSVをダウンロードしました。', 'success');
+            }
+
+            // --- 画像(PNG)のダウンロード処理 ---
+            function downloadChartImage(chartInstance, scaleType) {
+                if (!chartInstance || currentRawData.length === 0) {
+                    showToast('エクスポートするグラフデータがありません。', 'warning');
+                    return;
+                }
+                
+                // base64エンコードされた画像データを取得
+                const base64Image = chartInstance.toBase64Image();
+                
+                const baseName = currentFilename !== 'Spectrum' ? currentFilename.replace(/\.[^/.]+$/, "") : 'Spectrum';
+                const filename = `${baseName}_${scaleType}.png`;
+                
+                const link = document.createElement('a');
+                link.href = base64Image;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showToast(`グラフ画像(${scaleType})を保存しました。`, 'success');
+            }
+
+            document.getElementById('exportPngLinBtn').addEventListener('click', () => {
+                downloadChartImage(chartInstanceLin, 'Linear');
+            });
+
+            document.getElementById('exportPngLogBtn').addEventListener('click', () => {
+                downloadChartImage(chartInstanceLog, 'Log');
+            });
+        });
+    </script>
+</body>
+</html>
